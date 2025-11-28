@@ -1,5 +1,6 @@
 import sys
 import os
+import math  # Necesario para calcular ángulos
 import fitz  # PyMuPDF
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphicsScene,
                              QGraphicsPixmapItem, QGraphicsTextItem, QFileDialog,
@@ -7,7 +8,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphics
                              QGraphicsItem, QLabel, QMenu, QSizePolicy, QComboBox,
                              QFontDialog, QColorDialog)
 from PyQt6.QtCore import Qt, QRectF, QPointF
-from PyQt6.QtGui import QPixmap, QImage, QColor, QFont, QAction, QIcon, QPainter
+from PyQt6.QtGui import (QPixmap, QImage, QColor, QFont, QAction, QIcon, QPainter,
+                         QTransform, QPen, QPainterPath)
 
 # --- CONFIGURACIÓN GLOBAL ---
 CURRENT_LANG = "es"
@@ -44,7 +46,8 @@ TRANSLATIONS = {
         <ul>
             <li><b>Abrir PDF:</b> Carga tu documento.</li>
             <li><b>Añadir Firma/Texto:</b> Arrastra los elementos.</li>
-            <li><b>Editar:</b> Doble clic (texto) o Click derecho (formato/borrar).</li>
+            <li><b>Rotar:</b> Selecciona la firma y arrastra el círculo azul superior.</li>
+            <li><b>Redimensionar:</b> Usa la rueda del ratón sobre la firma seleccionada.</li>
             <li><b>Guardar:</b> Exporta el resultado a PDF.</li>
         </ul>
         <hr>
@@ -83,7 +86,8 @@ TRANSLATIONS = {
         <ul>
             <li><b>Open PDF:</b> Load your document.</li>
             <li><b>Add Sign/Text:</b> Drag elements onto the page.</li>
-            <li><b>Edit:</b> Double click (text) or Right click (format/delete).</li>
+            <li><b>Rotate:</b> Select signature and drag the top blue handle.</li>
+            <li><b>Resize:</b> Use mouse wheel on selected signature.</li>
             <li><b>Save:</b> Export result to PDF.</li>
         </ul>
         <hr>
@@ -122,7 +126,8 @@ TRANSLATIONS = {
         <ul>
             <li><b>Ireki PDF:</b> Kargatu dokumentua.</li>
             <li><b>Gehitu Sinadura/Testua:</b> Arrastatu elementuak.</li>
-            <li><b>Editatu:</b> Klik bikoitza (testua) edo Eskuineko botoia (formatua/ezabatu).</li>
+            <li><b>Biratu:</b> Hautatu sinadura eta arrastatu goiko zirkulu urdina.</li>
+            <li><b>Tamaina:</b> Erabili saguaren gurpila sinaduraren gainean.</li>
             <li><b>Gorde:</b> Esportatu emaitza PDFra.</li>
         </ul>
         <hr>
@@ -134,29 +139,20 @@ TRANSLATIONS = {
 }
 
 def tr(key):
-    """Función helper para traducir cadenas según el idioma actual."""
     return TRANSLATIONS.get(CURRENT_LANG, TRANSLATIONS["es"]).get(key, key)
 
 def get_resource_path(relative_path):
-    """
-    Obtiene la ruta absoluta al recurso.
-    Funciona para desarrollo (dev) y para cuando se compila con PyInstaller (_MEIPASS).
-    """
     try:
-        # PyInstaller crea una carpeta temporal y guarda la ruta en _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.dirname(os.path.abspath(__file__))
-
     return os.path.join(base_path, relative_path)
 
 # --- CLASES DE ELEMENTOS GRÁFICOS ---
 
 class DraggableTextItem(QGraphicsTextItem):
-    """Caja de texto que se puede arrastrar, editar, borrar y formatear."""
     def __init__(self, text="Texto aquí", parent=None):
         super().__init__(text, parent)
-        # Flags para permitir interacción
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable |
                       QGraphicsItem.GraphicsItemFlag.ItemIsSelectable |
                       QGraphicsItem.GraphicsItemFlag.ItemIsFocusable)
@@ -165,7 +161,6 @@ class DraggableTextItem(QGraphicsTextItem):
         self.setFont(font)
 
     def mouseDoubleClickEvent(self, event):
-        """Doble clic para editar el contenido del texto."""
         text, ok = QInputDialog.getMultiLineText(
             None, tr("edit_text_title"), tr("edit_text_label"), self.toPlainText()
         )
@@ -174,19 +169,12 @@ class DraggableTextItem(QGraphicsTextItem):
         super().mouseDoubleClickEvent(event)
 
     def contextMenuEvent(self, event):
-        """Menú contextual con opciones de formato y borrado."""
         menu = QMenu()
-
-        # Acciones de estilo
         action_font = menu.addAction(tr("change_font"))
         action_color = menu.addAction(tr("change_color"))
-
         menu.addSeparator()
-
-        # Acciones de edición
         action_delete = menu.addAction(tr("del_text"))
 
-        # Ejecutar menú en la posición del ratón
         action = menu.exec(event.screenPos())
 
         if action == action_delete:
@@ -207,32 +195,146 @@ class DraggableTextItem(QGraphicsTextItem):
             self.setDefaultTextColor(color)
 
 class DraggableImageItem(QGraphicsPixmapItem):
-    """Imagen (Firma) que se puede arrastrar y borrar."""
+    """Imagen (Firma) con rotación visual y redimensionado por rueda."""
     def __init__(self, pixmap, parent=None):
         super().__init__(pixmap, parent)
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable |
                       QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
-        # BoundingRectShape es más preciso para la selección
-        self.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
+
+        # Establecer punto de origen en el centro para rotación correcta
+        rect = pixmap.rect()
+        self.setTransformOriginPoint(rect.width() / 2, rect.height() / 2)
+
+        # Configuración del manejador de rotación
+        self.handle_size = 12
+        self.handle_offset = 25  # Distancia del handle por encima de la imagen
+        self.is_rotating = False
+
+    def boundingRect(self):
+        """Sobrescribimos para incluir el área del manejador de rotación."""
+        rect = super().boundingRect()
+        # Ampliamos el área hacia arriba para incluir el handle
+        return rect.adjusted(0, -self.handle_offset - self.handle_size, 0, 0)
+
+    def shape(self):
+        """
+        Define la forma exacta de colisión para incluir el manejador.
+        Esto soluciona el problema de que al hacer clic en el círculo se deseleccione.
+        """
+        path = QPainterPath()
+        rect = self.pixmap().rect()
+        path.addRect(QRectF(rect))
+
+        if self.isSelected():
+            # Si está seleccionado, añadimos el círculo del manejador a la forma interactuable
+            center_x = rect.width() / 2
+            handle_center = QPointF(center_x, -self.handle_offset)
+            hit_radius = self.handle_size / 1.5
+            path.addEllipse(handle_center, hit_radius, hit_radius)
+
+        return path
+
+    def paint(self, painter, option, widget=None):
+        """Dibujado personalizado para mostrar guías de selección."""
+        super().paint(painter, option, widget)
+
+        if self.isSelected():
+            painter.save()
+            rect = self.pixmap().rect()
+
+            # Dibujar borde discontinuo
+            pen = QPen(QColor("#2196F3"))
+            pen.setStyle(Qt.PenStyle.DashLine)
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(rect)
+
+            # Dibujar handle de rotación
+            center_x = rect.width() / 2
+            handle_center = QPointF(center_x, -self.handle_offset)
+
+            pen.setStyle(Qt.PenStyle.SolidLine)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(center_x, 0), handle_center)
+
+            painter.setBrush(QColor("white"))
+            # Dibujamos el círculo visual
+            painter.drawEllipse(handle_center, self.handle_size/2, self.handle_size/2)
+
+            painter.restore()
+
+    def wheelEvent(self, event):
+        """Redimensionar con la rueda del ratón si está seleccionado."""
+        if self.isSelected():
+            delta = event.delta()
+            step = 1.1
+
+            if delta > 0:
+                new_scale = self.scale() * step
+            else:
+                new_scale = self.scale() / step
+
+            if 0.05 < new_scale < 5.0:
+                self.setScale(new_scale)
+
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+    def mousePressEvent(self, event):
+        """Detectar si clicamos en el handle para rotar."""
+        if self.isSelected():
+            pos = event.pos()
+            rect = self.pixmap().rect()
+            center_x = rect.width() / 2
+            handle_center = QPointF(center_x, -self.handle_offset)
+
+            diff = pos - handle_center
+            if diff.manhattanLength() < self.handle_size * 1.5:
+                self.is_rotating = True
+                event.accept()
+                return
+
+        self.is_rotating = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Calcular rotación si estamos en modo rotación."""
+        if self.is_rotating:
+            item_pos = self.mapToScene(self.transformOriginPoint())
+            cursor_pos = event.scenePos()
+
+            angle_rad = math.atan2(cursor_pos.y() - item_pos.y(),
+                                   cursor_pos.x() - item_pos.x())
+
+            angle_deg = math.degrees(angle_rad) + 90
+            self.setRotation(angle_deg)
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.is_rotating = False
+        super().mouseReleaseEvent(event)
 
     def contextMenuEvent(self, event):
-        """Clic derecho para borrar la firma."""
         menu = QMenu()
+        # Eliminada opción redundante de redimensionar
         action_delete = menu.addAction(tr("del_sign"))
+
         action = menu.exec(event.screenPos())
+
         if action == action_delete:
             self.scene().removeItem(self)
 
 class PDFCanvas(QGraphicsView):
-    """El visor principal que maneja la escena gráfica."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
-        # Renderizado de alta calidad
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        self.setDragMode(QGraphicsView.DragMode.NoDrag) # Usamos select mode
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setBackgroundBrush(QColor("#e0e0e0"))
 
 # --- VENTANA PRINCIPAL ---
@@ -241,21 +343,17 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # Configuración de icono usando la ruta segura
         icon_path = get_resource_path("sign_and_seal_icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
         self.resize(1000, 800)
-
-        # Estado del PDF
         self.doc = None
         self.current_page_num = 0
         self.zoom_level = 1.5
         self.pdf_item = None
 
         self.init_ui()
-        # Aplicar textos iniciales según el idioma por defecto
         self.update_texts()
 
     def init_ui(self):
@@ -266,12 +364,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.canvas)
         self.setCentralWidget(main_widget)
 
-        # Barra de Herramientas
         self.toolbar = QToolBar()
         self.toolbar.setMovable(False)
         self.addToolBar(self.toolbar)
 
-        # --- Definición de Acciones ---
         self.btn_open = QAction(self)
         self.btn_open.triggered.connect(self.open_pdf)
         self.toolbar.addAction(self.btn_open)
@@ -303,12 +399,10 @@ class MainWindow(QMainWindow):
         self.btn_save.triggered.connect(self.save_pdf)
         self.toolbar.addAction(self.btn_save)
 
-        # Espaciador para empujar elementos a la derecha
         empty = QWidget()
         empty.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.toolbar.addWidget(empty)
 
-        # Selector de Idioma
         self.combo_lang = QComboBox()
         self.combo_lang.addItems(["Español", "English", "Euskera"])
         self.combo_lang.currentIndexChanged.connect(self.change_language)
@@ -330,10 +424,8 @@ class MainWindow(QMainWindow):
         self.update_texts()
 
     def update_texts(self):
-        """Actualiza todas las etiquetas de la UI al cambiar el idioma."""
         self.setWindowTitle(tr("window_title"))
         self.toolbar.setWindowTitle(tr("tools"))
-
         self.btn_open.setText(tr("open_pdf"))
         self.btn_sign.setText(tr("add_sign"))
         self.btn_text.setText(tr("add_text"))
@@ -346,7 +438,6 @@ class MainWindow(QMainWindow):
         QMessageBox.about(self, tr("help_title"), tr("help_content"))
 
     def open_pdf(self):
-        # Abrir en el directorio Home por defecto
         home_dir = os.path.expanduser("~")
         path, _ = QFileDialog.getOpenFileName(self, tr("open_pdf"), home_dir, "PDF Files (*.pdf)")
         if path:
@@ -358,21 +449,16 @@ class MainWindow(QMainWindow):
         if not self.doc: return
         self.canvas.scene.clear()
 
-        # Cargar página actual
         page = self.doc.load_page(self.current_page_num)
-
-        # Renderizar con zoom para calidad
         mat = fitz.Matrix(self.zoom_level, self.zoom_level)
         pix = page.get_pixmap(matrix=mat)
 
-        # Convertir a formato compatible con Qt
         img_format = QImage.Format.Format_RGBA8888 if pix.alpha else QImage.Format.Format_RGB888
         qimg = QImage(pix.samples, pix.width, pix.height, pix.stride, img_format)
 
         pixmap = QPixmap.fromImage(qimg)
         self.pdf_item = self.canvas.scene.addPixmap(pixmap)
-        self.pdf_item.setZValue(-1) # Enviar al fondo
-        # El fondo no debe moverse
+        self.pdf_item.setZValue(-1)
         self.pdf_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
         self.pdf_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
 
@@ -382,7 +468,6 @@ class MainWindow(QMainWindow):
     def add_text(self):
         if not self.doc: return
         item = DraggableTextItem(tr("default_text"))
-        # Centrar en la vista actual
         center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
         item.setPos(center)
         self.canvas.scene.addItem(item)
@@ -394,7 +479,6 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, tr("select_sign"), home_dir, "Images (*.png *.jpg *.jpeg)")
         if path:
             pixmap = QPixmap(path)
-            # Escalar si es muy grande
             if pixmap.height() > 200:
                 pixmap = pixmap.scaledToHeight(200, Qt.TransformationMode.SmoothTransformation)
 
@@ -422,28 +506,20 @@ class MainWindow(QMainWindow):
         try:
             page = self.doc[self.current_page_num]
 
-            # Recorrer todos los elementos de la escena
             for item in self.canvas.scene.items():
-                if item == self.pdf_item: continue # Ignorar el fondo
-
-                # Calcular coordenadas relativas al PDF original (revertir zoom)
-                pos = item.scenePos()
-                x = pos.x() / self.zoom_level
-                y = pos.y() / self.zoom_level
+                if item == self.pdf_item: continue
 
                 if isinstance(item, DraggableTextItem):
-                    text = item.toPlainText()
-                    # Recuperar color y tamaño elegidos
-                    qcolor = item.defaultTextColor()
-                    # PyMuPDF usa tuplas RGB de 0 a 1 (ej: 0.5, 0.5, 0.5)
-                    pdf_color = (qcolor.redF(), qcolor.greenF(), qcolor.blueF())
+                    pos = item.scenePos()
+                    x = pos.x() / self.zoom_level
+                    y = pos.y() / self.zoom_level
 
-                    # Recuperar tamaño de fuente
+                    text = item.toPlainText()
+                    qcolor = item.defaultTextColor()
+                    pdf_color = (qcolor.redF(), qcolor.greenF(), qcolor.blueF())
                     font_size = item.font().pointSize()
 
-                    point = fitz.Point(x, y + font_size) # Ajuste visual de baseline
-
-                    # Insertar texto con los atributos personalizados
+                    point = fitz.Point(x, y + font_size)
                     page.insert_text(point, text, fontsize=font_size, fontname="helv", color=pdf_color)
 
                 elif isinstance(item, DraggableImageItem):
@@ -451,15 +527,31 @@ class MainWindow(QMainWindow):
                     ba = QByteArray()
                     buf = QBuffer(ba)
                     buf.open(QBuffer.OpenModeFlag.WriteOnly)
-                    # Guardar el pixmap actual (tal cual se ve) en memoria
                     item.pixmap().save(buf, "PNG")
 
-                    width = item.pixmap().width() / self.zoom_level
-                    height = item.pixmap().height() / self.zoom_level
-                    rect = fitz.Rect(x, y, x + width, y + height)
+                    scale = item.scale()
+                    rotation = int(item.rotation()) % 360
 
-                    # Insertar imagen desde el buffer
-                    page.insert_image(rect, stream=ba.data())
+                    orig_w = item.pixmap().width()
+                    orig_h = item.pixmap().height()
+
+                    scaled_w = orig_w * scale
+                    scaled_h = orig_h * scale
+
+                    scene_center = item.sceneBoundingRect().center()
+
+                    pdf_center_x = scene_center.x() / self.zoom_level
+                    pdf_center_y = scene_center.y() / self.zoom_level
+
+                    final_w = scaled_w / self.zoom_level
+                    final_h = scaled_h / self.zoom_level
+
+                    rect = fitz.Rect(pdf_center_x - final_w/2,
+                                     pdf_center_y - final_h/2,
+                                     pdf_center_x + final_w/2,
+                                     pdf_center_y + final_h/2)
+
+                    page.insert_image(rect, stream=ba.data(), rotate=rotation)
 
             self.doc.save(out_path)
             QMessageBox.information(self, tr("success"), tr("saved_msg"))
@@ -471,11 +563,9 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
-    # --- RUTA DE ICONO GLOBAL SEGURA ---
     icon_path = get_resource_path("sign_and_seal_icon.png")
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
-    # -----------------------------------
 
     window = MainWindow()
     window.show()
