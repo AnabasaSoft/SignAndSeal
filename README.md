@@ -111,7 +111,7 @@ pip install -r requirements.txt
 4. **Ejecuta la aplicación:**
 
 ```bash
-python sign_and_seal_v2.py
+python sign_and_seal.py
 ```
 
 ---

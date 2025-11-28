@@ -5,13 +5,14 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QGraphicsView, QGraphics
                              QGraphicsPixmapItem, QGraphicsTextItem, QFileDialog,
                              QToolBar, QVBoxLayout, QWidget, QMessageBox, QInputDialog,
                              QGraphicsItem, QLabel, QMenu, QSizePolicy, QComboBox,
-                             QFontDialog, QColorDialog) # Nuevos imports
+                             QFontDialog, QColorDialog)
 from PyQt6.QtCore import Qt, QRectF, QPointF
 from PyQt6.QtGui import QPixmap, QImage, QColor, QFont, QAction, QIcon, QPainter
 
-# --- GESTIÓN DE IDIOMAS ---
+# --- CONFIGURACIÓN GLOBAL ---
 CURRENT_LANG = "es"
 
+# --- DICCIONARIO DE TRADUCCIONES ---
 TRANSLATIONS = {
     "es": {
         "window_title": "Sign & Seal - Firmador PDF Linux",
@@ -133,13 +134,29 @@ TRANSLATIONS = {
 }
 
 def tr(key):
-    """Función helper para traducir."""
+    """Función helper para traducir cadenas según el idioma actual."""
     return TRANSLATIONS.get(CURRENT_LANG, TRANSLATIONS["es"]).get(key, key)
+
+def get_resource_path(relative_path):
+    """
+    Obtiene la ruta absoluta al recurso.
+    Funciona para desarrollo (dev) y para cuando se compila con PyInstaller (_MEIPASS).
+    """
+    try:
+        # PyInstaller crea una carpeta temporal y guarda la ruta en _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+
+    return os.path.join(base_path, relative_path)
+
+# --- CLASES DE ELEMENTOS GRÁFICOS ---
 
 class DraggableTextItem(QGraphicsTextItem):
     """Caja de texto que se puede arrastrar, editar, borrar y formatear."""
     def __init__(self, text="Texto aquí", parent=None):
         super().__init__(text, parent)
+        # Flags para permitir interacción
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable |
                       QGraphicsItem.GraphicsItemFlag.ItemIsSelectable |
                       QGraphicsItem.GraphicsItemFlag.ItemIsFocusable)
@@ -148,6 +165,7 @@ class DraggableTextItem(QGraphicsTextItem):
         self.setFont(font)
 
     def mouseDoubleClickEvent(self, event):
+        """Doble clic para editar el contenido del texto."""
         text, ok = QInputDialog.getMultiLineText(
             None, tr("edit_text_title"), tr("edit_text_label"), self.toPlainText()
         )
@@ -156,6 +174,7 @@ class DraggableTextItem(QGraphicsTextItem):
         super().mouseDoubleClickEvent(event)
 
     def contextMenuEvent(self, event):
+        """Menú contextual con opciones de formato y borrado."""
         menu = QMenu()
 
         # Acciones de estilo
@@ -167,7 +186,7 @@ class DraggableTextItem(QGraphicsTextItem):
         # Acciones de edición
         action_delete = menu.addAction(tr("del_text"))
 
-        # Ejecutar menú
+        # Ejecutar menú en la posición del ratón
         action = menu.exec(event.screenPos())
 
         if action == action_delete:
@@ -193,9 +212,11 @@ class DraggableImageItem(QGraphicsPixmapItem):
         super().__init__(pixmap, parent)
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable |
                       QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        # BoundingRectShape es más preciso para la selección
         self.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
 
     def contextMenuEvent(self, event):
+        """Clic derecho para borrar la firma."""
         menu = QMenu()
         action_delete = menu.addAction(tr("del_sign"))
         action = menu.exec(event.screenPos())
@@ -203,33 +224,38 @@ class DraggableImageItem(QGraphicsPixmapItem):
             self.scene().removeItem(self)
 
 class PDFCanvas(QGraphicsView):
+    """El visor principal que maneja la escena gráfica."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
+        # Renderizado de alta calidad
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag) # Usamos select mode
         self.setBackgroundBrush(QColor("#e0e0e0"))
+
+# --- VENTANA PRINCIPAL ---
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # Configuración de ruta segura para el icono
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        icon_path = os.path.join(script_dir, "sign_and_seal_icon.png")
+        # Configuración de icono usando la ruta segura
+        icon_path = get_resource_path("sign_and_seal_icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
         self.resize(1000, 800)
 
+        # Estado del PDF
         self.doc = None
         self.current_page_num = 0
         self.zoom_level = 1.5
         self.pdf_item = None
 
         self.init_ui()
+        # Aplicar textos iniciales según el idioma por defecto
         self.update_texts()
 
     def init_ui(self):
@@ -240,11 +266,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.canvas)
         self.setCentralWidget(main_widget)
 
-        # Toolbar
+        # Barra de Herramientas
         self.toolbar = QToolBar()
         self.toolbar.setMovable(False)
         self.addToolBar(self.toolbar)
 
+        # --- Definición de Acciones ---
         self.btn_open = QAction(self)
         self.btn_open.triggered.connect(self.open_pdf)
         self.toolbar.addAction(self.btn_open)
@@ -276,12 +303,14 @@ class MainWindow(QMainWindow):
         self.btn_save.triggered.connect(self.save_pdf)
         self.toolbar.addAction(self.btn_save)
 
+        # Espaciador para empujar elementos a la derecha
         empty = QWidget()
         empty.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.toolbar.addWidget(empty)
 
+        # Selector de Idioma
         self.combo_lang = QComboBox()
-        self.combo_lang.addItems(["Español", "English", "Euskara"])
+        self.combo_lang.addItems(["Español", "English", "Euskera"])
         self.combo_lang.currentIndexChanged.connect(self.change_language)
         self.toolbar.addWidget(self.combo_lang)
 
@@ -297,11 +326,14 @@ class MainWindow(QMainWindow):
         if index == 0: CURRENT_LANG = "es"
         elif index == 1: CURRENT_LANG = "en"
         elif index == 2: CURRENT_LANG = "eu"
+
         self.update_texts()
 
     def update_texts(self):
+        """Actualiza todas las etiquetas de la UI al cambiar el idioma."""
         self.setWindowTitle(tr("window_title"))
         self.toolbar.setWindowTitle(tr("tools"))
+
         self.btn_open.setText(tr("open_pdf"))
         self.btn_sign.setText(tr("add_sign"))
         self.btn_text.setText(tr("add_text"))
@@ -314,7 +346,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(self, tr("help_title"), tr("help_content"))
 
     def open_pdf(self):
-        # Usar expanduser("~") para obtener la carpeta home del usuario
+        # Abrir en el directorio Home por defecto
         home_dir = os.path.expanduser("~")
         path, _ = QFileDialog.getOpenFileName(self, tr("open_pdf"), home_dir, "PDF Files (*.pdf)")
         if path:
@@ -326,16 +358,21 @@ class MainWindow(QMainWindow):
         if not self.doc: return
         self.canvas.scene.clear()
 
+        # Cargar página actual
         page = self.doc.load_page(self.current_page_num)
+
+        # Renderizar con zoom para calidad
         mat = fitz.Matrix(self.zoom_level, self.zoom_level)
         pix = page.get_pixmap(matrix=mat)
 
+        # Convertir a formato compatible con Qt
         img_format = QImage.Format.Format_RGBA8888 if pix.alpha else QImage.Format.Format_RGB888
         qimg = QImage(pix.samples, pix.width, pix.height, pix.stride, img_format)
 
         pixmap = QPixmap.fromImage(qimg)
         self.pdf_item = self.canvas.scene.addPixmap(pixmap)
-        self.pdf_item.setZValue(-1)
+        self.pdf_item.setZValue(-1) # Enviar al fondo
+        # El fondo no debe moverse
         self.pdf_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
         self.pdf_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
 
@@ -345,6 +382,7 @@ class MainWindow(QMainWindow):
     def add_text(self):
         if not self.doc: return
         item = DraggableTextItem(tr("default_text"))
+        # Centrar en la vista actual
         center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
         item.setPos(center)
         self.canvas.scene.addItem(item)
@@ -352,11 +390,11 @@ class MainWindow(QMainWindow):
 
     def add_signature(self):
         if not self.doc: return
-        # También aplicamos la carpeta de usuario para buscar firmas
         home_dir = os.path.expanduser("~")
         path, _ = QFileDialog.getOpenFileName(self, tr("select_sign"), home_dir, "Images (*.png *.jpg *.jpeg)")
         if path:
             pixmap = QPixmap(path)
+            # Escalar si es muy grande
             if pixmap.height() > 200:
                 pixmap = pixmap.scaledToHeight(200, Qt.TransformationMode.SmoothTransformation)
 
@@ -377,7 +415,6 @@ class MainWindow(QMainWindow):
 
     def save_pdf(self):
         if not self.doc: return
-        # Para guardar, también sugerimos el home
         home_dir = os.path.expanduser("~")
         out_path, _ = QFileDialog.getSaveFileName(self, tr("save_dialog"), home_dir, "PDF Files (*.pdf)")
         if not out_path: return
@@ -385,9 +422,11 @@ class MainWindow(QMainWindow):
         try:
             page = self.doc[self.current_page_num]
 
+            # Recorrer todos los elementos de la escena
             for item in self.canvas.scene.items():
-                if item == self.pdf_item: continue
+                if item == self.pdf_item: continue # Ignorar el fondo
 
+                # Calcular coordenadas relativas al PDF original (revertir zoom)
                 pos = item.scenePos()
                 x = pos.x() / self.zoom_level
                 y = pos.y() / self.zoom_level
@@ -402,7 +441,7 @@ class MainWindow(QMainWindow):
                     # Recuperar tamaño de fuente
                     font_size = item.font().pointSize()
 
-                    point = fitz.Point(x, y + font_size) # Ajuste visual
+                    point = fitz.Point(x, y + font_size) # Ajuste visual de baseline
 
                     # Insertar texto con los atributos personalizados
                     page.insert_text(point, text, fontsize=font_size, fontname="helv", color=pdf_color)
@@ -412,15 +451,19 @@ class MainWindow(QMainWindow):
                     ba = QByteArray()
                     buf = QBuffer(ba)
                     buf.open(QBuffer.OpenModeFlag.WriteOnly)
+                    # Guardar el pixmap actual (tal cual se ve) en memoria
                     item.pixmap().save(buf, "PNG")
 
                     width = item.pixmap().width() / self.zoom_level
                     height = item.pixmap().height() / self.zoom_level
                     rect = fitz.Rect(x, y, x + width, y + height)
+
+                    # Insertar imagen desde el buffer
                     page.insert_image(rect, stream=ba.data())
 
             self.doc.save(out_path)
             QMessageBox.information(self, tr("success"), tr("saved_msg"))
+
         except Exception as e:
             QMessageBox.critical(self, tr("error"), str(e))
 
@@ -428,10 +471,11 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    icon_path = os.path.join(script_dir, "sign_and_seal_icon.png")
+    # --- RUTA DE ICONO GLOBAL SEGURA ---
+    icon_path = get_resource_path("sign_and_seal_icon.png")
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
+    # -----------------------------------
 
     window = MainWindow()
     window.show()

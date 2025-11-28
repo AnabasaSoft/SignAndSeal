@@ -1,0 +1,152 @@
+name: Build All Platforms
+
+on:
+  push:
+    tags:
+      - 'v*' # Se ejecuta solo cuando subes un tag (ej: v1.0), para no compilar en cada commit pequeño
+  workflow_dispatch: # Permite ejecutarlo manualmente desde la web de GitHub
+
+jobs:
+  # ------------------------------------------------------------------
+  # JOB 1: LINUX (.deb y .rpm)
+  # ------------------------------------------------------------------
+  build-linux:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby-dev build-essential
+          sudo gem install fpm
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Binary with PyInstaller
+        # El separador de add-data en Linux es :
+        run: |
+          pyinstaller --onefile --noconsole --clean \
+            --add-data "sign_and_seal_icon.png:." \
+            --name "SignAndSeal" \
+            sign_and_seal.py
+
+      - name: Create Linux Packages (.deb & .rpm)
+        run: |
+          # 1. Preparar estructura de carpetas fake
+          mkdir -p dist/linux_pkg/usr/local/bin
+          mkdir -p dist/linux_pkg/usr/share/applications
+          mkdir -p dist/linux_pkg/usr/share/icons/hicolor/256x256/apps
+
+          # 2. Copiar binario e icono
+          cp dist/SignAndSeal dist/linux_pkg/usr/local/bin/
+          cp sign_and_seal_icon.png dist/linux_pkg/usr/share/icons/hicolor/256x256/apps/sign-and-seal.png
+
+          # 3. Crear archivo .desktop al vuelo para el menú de aplicaciones
+          cat > dist/linux_pkg/usr/share/applications/sign-and-seal.desktop <<EOF
+          [Desktop Entry]
+          Name=Sign & Seal
+          Comment=Firmador de PDFs simple
+          Exec=/usr/local/bin/SignAndSeal
+          Icon=sign-and-seal
+          Type=Application
+          Categories=Office;Utility;
+          EOF
+
+          # 4. Generar .deb con FPM
+          fpm -s dir -t deb -n sign-and-seal -v 3.0.0 \
+            -C dist/linux_pkg \
+            -p dist/SignAndSeal_3.0.0_amd64.deb \
+            --description "Simple PDF Signer for Linux" \
+            --maintainer "AnabasaSoft <anabasasoft@gmail.com>" \
+            usr
+
+          # 5. Generar .rpm con FPM
+          fpm -s dir -t rpm -n sign-and-seal -v 3.0.0 \
+            -C dist/linux_pkg \
+            -p dist/SignAndSeal-3.0.0.x86_64.rpm \
+            --description "Simple PDF Signer for Linux" \
+            --maintainer "AnabasaSoft <anabasasoft@gmail.com>" \
+            usr
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Linux-Packages
+          path: dist/*.{deb,rpm}
+
+  # ------------------------------------------------------------------
+  # JOB 2: WINDOWS (.exe)
+  # ------------------------------------------------------------------
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build EXE
+        # El separador de add-data en Windows es ;
+        run: |
+          pyinstaller --onefile --noconsole --clean `
+            --add-data "sign_and_seal_icon.png;." `
+            --name "SignAndSeal" `
+            sign_and_seal.py
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Exe
+          path: dist/SignAndSeal.exe
+
+  # ------------------------------------------------------------------
+  # JOB 3: MACOS (.app)
+  # ------------------------------------------------------------------
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build App Bundle
+        # El separador de add-data en Mac es :
+        run: |
+          pyinstaller --windowed --clean \
+            --add-data "sign_and_seal_icon.png:." \
+            --name "SignAndSeal" \
+            --icon "sign_and_seal_icon.png" \
+            sign_and_seal.py
+
+      - name: Zip App Bundle
+        # GitHub Actions sube carpetas lento, mejor zippear la .app
+        run: |
+          cd dist
+          zip -r SignAndSeal-macOS.zip SignAndSeal.app
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-App
+          path: dist/SignAndSeal-macOS.zip
