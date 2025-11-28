@@ -149,7 +149,7 @@ Este proyecto ha sido desarrollado con ❤️ y mucho café por:
 **Daniel Serrano Armenta (AnabasaSoft)**
 
 - 📧 **Email:** [anabasasoft@gmail.com](mailto:anabasasoft@gmail.com)
-- 🐙 **GitHub:** [github.com/danitxu79](https://github.com/anabasasoft)
+- 🐙 **GitHub:** [github.com/anabasasoft](https://github.com/anabasasoft)
 - 🌐 **Portafolio:** [danitxu79.github.io](https://danitxu79.github.io)
 
 ---
