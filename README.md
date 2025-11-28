@@ -27,6 +27,14 @@ Esta aplicación no modifica el texto original del PDF (evitando corrupción de 
 
 ---
 
+## 📸 Capturas de Pantalla
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/anabasasoft/SignAndSeal/main/Captura.png" alt="Captura de Pantalla Sign & Seal" width="800">
+</div>
+
+---
+
 ## 🛠️ Instalación
 
 ### 📦 Instalación Rápida (Paquetes Precompilados)
