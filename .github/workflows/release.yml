@@ -34,7 +34,7 @@ jobs:
           pyinstaller --onefile --noconsole --clean \
             --add-data "sign_and_seal_icon.png:." \
             --name "SignAndSeal" \
-            sign_and_seal_v2.py
+            sign_and_seal.py
 
       - name: Create Linux Packages (.deb & .rpm)
         run: |
@@ -100,7 +100,7 @@ jobs:
           pyinstaller --onefile --noconsole --clean `
             --add-data "sign_and_seal_icon.png;." `
             --name "SignAndSeal" `
-            sign_and_seal_v2.py
+            sign_and_seal.py
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
@@ -134,7 +134,7 @@ jobs:
             --add-data "sign_and_seal_icon.png:." \
             --name "SignAndSeal" \
             --icon "sign_and_seal_icon.png" \
-            sign_and_seal_v2.py
+            sign_and_seal.py
 
       - name: Zip App Bundle
         run: |
