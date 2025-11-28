@@ -3,8 +3,8 @@ name: Build All Platforms
 on:
   push:
     tags:
-      - 'v*' # Se ejecuta solo cuando subes un tag (ej: v1.0), para no compilar en cada commit pequeño
-  workflow_dispatch: # Permite ejecutarlo manualmente desde la web de GitHub
+      - 'v*' # Se ejecuta al crear un tag (ej: v1.0)
+  workflow_dispatch: # Permite ejecución manual
 
 jobs:
   # ------------------------------------------------------------------
@@ -27,27 +27,24 @@ jobs:
           sudo gem install fpm
           pip install -r requirements.txt
           pip install pyinstaller
+          pip install Pillow # IMPORTANTE para procesar imágenes
 
       - name: Build Binary with PyInstaller
-        # El separador de add-data en Linux es :
         run: |
           pyinstaller --onefile --noconsole --clean \
             --add-data "sign_and_seal_icon.png:." \
             --name "SignAndSeal" \
-            sign_and_seal.py
+            sign_and_seal_v2.py
 
       - name: Create Linux Packages (.deb & .rpm)
         run: |
-          # 1. Preparar estructura de carpetas fake
           mkdir -p dist/linux_pkg/usr/local/bin
           mkdir -p dist/linux_pkg/usr/share/applications
           mkdir -p dist/linux_pkg/usr/share/icons/hicolor/256x256/apps
 
-          # 2. Copiar binario e icono
           cp dist/SignAndSeal dist/linux_pkg/usr/local/bin/
           cp sign_and_seal_icon.png dist/linux_pkg/usr/share/icons/hicolor/256x256/apps/sign-and-seal.png
 
-          # 3. Crear archivo .desktop al vuelo para el menú de aplicaciones
           cat > dist/linux_pkg/usr/share/applications/sign-and-seal.desktop <<EOF
           [Desktop Entry]
           Name=Sign & Seal
@@ -58,7 +55,6 @@ jobs:
           Categories=Office;Utility;
           EOF
 
-          # 4. Generar .deb con FPM
           fpm -s dir -t deb -n sign-and-seal -v 3.0.0 \
             -C dist/linux_pkg \
             -p dist/SignAndSeal_3.0.0_amd64.deb \
@@ -66,7 +62,6 @@ jobs:
             --maintainer "AnabasaSoft <anabasasoft@gmail.com>" \
             usr
 
-          # 5. Generar .rpm con FPM
           fpm -s dir -t rpm -n sign-and-seal -v 3.0.0 \
             -C dist/linux_pkg \
             -p dist/SignAndSeal-3.0.0.x86_64.rpm \
@@ -97,14 +92,15 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pyinstaller
+          pip install Pillow # IMPORTANTE para convertir iconos en Windows
 
       - name: Build EXE
-        # El separador de add-data en Windows es ;
+        # En Windows el separador es ;
         run: |
           pyinstaller --onefile --noconsole --clean `
             --add-data "sign_and_seal_icon.png;." `
             --name "SignAndSeal" `
-            sign_and_seal.py
+            sign_and_seal_v2.py
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
@@ -129,18 +125,18 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pyinstaller
+          pip install Pillow # CRÍTICO: Convierte PNG a ICNS automáticamente
 
       - name: Build App Bundle
-        # El separador de add-data en Mac es :
+        # En Mac el separador es :
         run: |
           pyinstaller --windowed --clean \
             --add-data "sign_and_seal_icon.png:." \
             --name "SignAndSeal" \
             --icon "sign_and_seal_icon.png" \
-            sign_and_seal.py
+            sign_and_seal_v2.py
 
       - name: Zip App Bundle
-        # GitHub Actions sube carpetas lento, mejor zippear la .app
         run: |
           cd dist
           zip -r SignAndSeal-macOS.zip SignAndSeal.app
