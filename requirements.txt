@@ -1,2 +1,6 @@
 PyQt6
 pymupdf
+opencv-python-headless
+numpy
+qrcode
+Pillow
