@@ -27,7 +27,7 @@ jobs:
           sudo gem install fpm
           pip install -r requirements.txt
           pip install pyinstaller
-          pip install Pillow # IMPORTANTE para procesar imágenes
+          pip install Pillow
 
       - name: Build Binary with PyInstaller
         run: |
@@ -73,7 +73,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Linux-Packages
-          path: dist/*.{deb,rpm}
+          path: |
+            dist/*.deb
+            dist/*.rpm
 
   # ------------------------------------------------------------------
   # JOB 2: WINDOWS (.exe)
@@ -92,10 +94,9 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pyinstaller
-          pip install Pillow # IMPORTANTE para convertir iconos en Windows
+          pip install Pillow
 
       - name: Build EXE
-        # En Windows el separador es ;
         run: |
           pyinstaller --onefile --noconsole --clean `
             --add-data "sign_and_seal_icon.png;." `
@@ -125,10 +126,9 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pyinstaller
-          pip install Pillow # CRÍTICO: Convierte PNG a ICNS automáticamente
+          pip install Pillow
 
       - name: Build App Bundle
-        # En Mac el separador es :
         run: |
           pyinstaller --windowed --clean \
             --add-data "sign_and_seal_icon.png:." \
@@ -146,3 +146,31 @@ jobs:
         with:
           name: macOS-App
           path: dist/SignAndSeal-macOS.zip
+
+  # ------------------------------------------------------------------
+  # JOB 4: CREATE GITHUB RELEASE
+  # ------------------------------------------------------------------
+  create-release:
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/Linux-Packages/*.deb
+            artifacts/Linux-Packages/*.rpm
+            artifacts/Windows-Exe/SignAndSeal.exe
+            artifacts/macOS-App/SignAndSeal-macOS.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
