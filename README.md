@@ -1,5 +1,7 @@
 # **✒️ Sign & Seal**
 
+<img src="https://raw.githubusercontent.com/AnabasaSoft/SignAndSeal/main/sign_and_seal_icon.png" alt="Sign & Seal Icon" width="100%"/>
+
 ## **📖 Descripción**
 
 En el ecosistema de Linux, a menudo nos encontramos en una encrucijada al tratar con PDFs: o usamos visores simples que no permiten editar (Evince, Okular) o recurrimos a suites pesadas y complejas (LibreOffice Draw, Inkscape).  
