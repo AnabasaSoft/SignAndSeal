@@ -3,15 +3,15 @@ name: Build All Platforms
 on:
   push:
     tags:
-      - 'v*' # Se ejecuta al crear un tag (ej: v1.0)
-  workflow_dispatch: # Permite ejecución manual
+      - 'v*' # Se ejecuta al crear un tag (ej: v5.0.0)
+  workflow_dispatch: # Permite ejecución manual (Botón "Run workflow")
 
 jobs:
   # ------------------------------------------------------------------
   # JOB 1: LINUX (.deb y .rpm)
   # ------------------------------------------------------------------
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
 
@@ -25,9 +25,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ruby-dev build-essential
           sudo gem install fpm
-          pip install -r requirements.txt
-          pip install pyinstaller
-          pip install Pillow
+          pip install --upgrade pip
+          # INSTALACIÓN DE DEPENDENCIAS V5.0
+          pip install pyinstaller pymupdf PyQt6 Pillow numpy qrcode "pyhanko[crypto]" opencv-python-headless
 
       - name: Build Binary with PyInstaller
         run: |
@@ -48,24 +48,26 @@ jobs:
           cat > dist/linux_pkg/usr/share/applications/sign-and-seal.desktop <<EOF
           [Desktop Entry]
           Name=Sign & Seal
-          Comment=Firmador de PDFs simple
+          Comment=Legal PDF Signer (eIDAS)
           Exec=/usr/local/bin/SignAndSeal
           Icon=sign-and-seal
           Type=Application
           Categories=Office;Utility;
           EOF
 
-          fpm -s dir -t deb -n sign-and-seal -v 3.0.0 \
+          # Generar .deb
+          fpm -s dir -t deb -n sign-and-seal -v 5.0.0 \
             -C dist/linux_pkg \
-            -p dist/SignAndSeal_3.0.0_amd64.deb \
-            --description "Simple PDF Signer for Linux" \
+            -p dist/SignAndSeal_5.0.0_amd64.deb \
+            --description "Legal PDF Signer for Linux" \
             --maintainer "AnabasaSoft <anabasasoft@gmail.com>" \
             usr
 
-          fpm -s dir -t rpm -n sign-and-seal -v 3.0.0 \
+          # Generar .rpm
+          fpm -s dir -t rpm -n sign-and-seal -v 5.0.0 \
             -C dist/linux_pkg \
-            -p dist/SignAndSeal-3.0.0.x86_64.rpm \
-            --description "Simple PDF Signer for Linux" \
+            -p dist/SignAndSeal-5.0.0.x86_64.rpm \
+            --description "Legal PDF Signer for Linux" \
             --maintainer "AnabasaSoft <anabasasoft@gmail.com>" \
             usr
 
@@ -73,9 +75,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Linux-Packages
-          path: |
-            dist/*.deb
-            dist/*.rpm
+          path: dist/*.{deb,rpm}
 
   # ------------------------------------------------------------------
   # JOB 2: WINDOWS (.exe)
@@ -92,11 +92,12 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-          pip install Pillow
+          pip install --upgrade pip
+          # INSTALACIÓN DE DEPENDENCIAS V5.0
+          pip install pyinstaller pymupdf PyQt6 Pillow numpy qrcode "pyhanko[crypto]" opencv-python-headless
 
       - name: Build EXE
+        # En Windows el separador es ;
         run: |
           pyinstaller --onefile --noconsole --clean `
             --add-data "sign_and_seal_icon.png;." `
@@ -124,11 +125,12 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-          pip install Pillow
+          pip install --upgrade pip
+          # INSTALACIÓN DE DEPENDENCIAS V5.0
+          pip install pyinstaller pymupdf PyQt6 Pillow numpy qrcode "pyhanko[crypto]" opencv-python-headless
 
       - name: Build App Bundle
+        # En Mac el separador es :
         run: |
           pyinstaller --windowed --clean \
             --add-data "sign_and_seal_icon.png:." \
@@ -146,31 +148,3 @@ jobs:
         with:
           name: macOS-App
           path: dist/SignAndSeal-macOS.zip
-
-  # ------------------------------------------------------------------
-  # JOB 4: CREATE GITHUB RELEASE
-  # ------------------------------------------------------------------
-  create-release:
-    needs: [build-linux, build-windows, build-macos]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            artifacts/Linux-Packages/*.deb
-            artifacts/Linux-Packages/*.rpm
-            artifacts/Windows-Exe/SignAndSeal.exe
-            artifacts/macOS-App/SignAndSeal-macOS.zip
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
