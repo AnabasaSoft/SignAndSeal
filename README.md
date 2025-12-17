@@ -1,6 +1,6 @@
 # **✒️ Sign & Seal**
 
-<img src="https://raw.githubusercontent.com/AnabasaSoft/SignAndSeal/main/sign_and_seal_icon.png" alt="Sign & Seal Icon" width="100%"/>
+<img src="https://raw.githubusercontent.com/AnabasaSoft/SignAndSeal/main/sign_and_seal_icon.png" alt="Sign & Seal Icon" width="200%"/>
 
 ## **📖 Descripción**
 
