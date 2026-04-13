@@ -4,6 +4,7 @@ import math
 import socket
 import threading
 import tempfile
+import shutil
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import email.parser
 import email.policy
@@ -507,13 +508,19 @@ class PDFCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setBackgroundBrush(QColor("#e0e0e0"))
 
+    def scrollContentsBy(self, dx, dy):
+        super().scrollContentsBy(dx, dy)
+        main_win = self.window()
+        if hasattr(main_win, 'update_page_label_from_scroll'):
+            main_win.update_page_label_from_scroll()
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         icon_path = get_resource_path("sign_and_seal_icon.png")
         if os.path.exists(icon_path): self.setWindowIcon(QIcon(icon_path))
         self.resize(1200, 850)
-        self.doc = None; self.current_page_num = 0; self.zoom_level = 1.5; self.pdf_item = None
+        self.doc = None; self.current_page_num = 0; self.zoom_level = 1.5; self.page_items = []
         self.init_ui(); self.update_texts()
 
     def init_ui(self):
@@ -577,25 +584,54 @@ class MainWindow(QMainWindow):
         home_dir = os.path.expanduser("~")
         path, _ = QFileDialog.getOpenFileName(self, tr("open_pdf"), home_dir, "PDF Files (*.pdf)")
         if path:
-            self.doc = fitz.open(path)
+            # Leer el archivo a la memoria RAM para evitar corrupción si se sobrescribe
+            with open(path, "rb") as f:
+                pdf_data = f.read()
+            self.doc = fitz.open("pdf", pdf_data)
             self.current_page_num = 0
             self.render_page()
 
     def render_page(self):
         if not self.doc: return
         self.canvas.scene.clear()
-        page = self.doc.load_page(self.current_page_num)
+        self.page_items = []
+
+        current_y = 0
+        gap = 20 # Espacio gris de separación entre páginas
         mat = fitz.Matrix(self.zoom_level, self.zoom_level)
-        pix = page.get_pixmap(matrix=mat)
-        img_format = QImage.Format.Format_RGBA8888 if pix.alpha else QImage.Format.Format_RGB888
-        qimg = QImage(pix.samples, pix.width, pix.height, pix.stride, img_format)
-        pixmap = QPixmap.fromImage(qimg)
-        self.pdf_item = self.canvas.scene.addPixmap(pixmap)
-        self.pdf_item.setZValue(-1)
-        self.pdf_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
-        self.pdf_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
-        self.canvas.setSceneRect(QRectF(pixmap.rect()))
-        self.lbl_page.setText(f" {self.current_page_num + 1} / {len(self.doc)} ")
+
+        for page_num in range(len(self.doc)):
+            page = self.doc.load_page(page_num)
+            pix = page.get_pixmap(matrix=mat)
+            img_format = QImage.Format.Format_RGBA8888 if pix.alpha else QImage.Format.Format_RGB888
+            qimg = QImage(pix.samples, pix.width, pix.height, pix.stride, img_format)
+            pixmap = QPixmap.fromImage(qimg)
+
+            pdf_item = self.canvas.scene.addPixmap(pixmap)
+            pdf_item.setPos(0, current_y)
+            pdf_item.setZValue(-1)
+            pdf_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
+            pdf_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+
+            self.page_items.append({
+                "page_num": page_num,
+                "y_offset": current_y,
+                "height": pixmap.height()
+            })
+            current_y += pixmap.height() + gap
+
+        self.canvas.setSceneRect(self.canvas.scene.itemsBoundingRect())
+        self.update_page_label_from_scroll()
+
+    def update_page_label_from_scroll(self):
+        if not self.doc or not self.page_items: return
+        # Calcular qué página está pasando por el centro de la pantalla
+        view_center_y = self.canvas.mapToScene(self.canvas.viewport().rect().center()).y()
+        for p_info in self.page_items:
+            if p_info["y_offset"] <= view_center_y <= p_info["y_offset"] + p_info["height"]:
+                self.current_page_num = p_info["page_num"]
+                self.lbl_page.setText(f" {self.current_page_num + 1} / {len(self.doc)} ")
+                break
 
     def add_text(self):
         if not self.doc: return
@@ -628,48 +664,70 @@ class MainWindow(QMainWindow):
         self.canvas.scene.addItem(item)
 
     def prev_page(self):
-        if self.doc and self.current_page_num > 0: self.current_page_num -= 1; self.render_page()
+        if self.doc and self.current_page_num > 0:
+            self.current_page_num -= 1
+            target_y = self.page_items[self.current_page_num]["y_offset"]
+            self.canvas.verticalScrollBar().setValue(int(target_y))
 
     def next_page(self):
-        if self.doc and self.current_page_num < len(self.doc) - 1: self.current_page_num += 1; self.render_page()
+        if self.doc and self.current_page_num < len(self.doc) - 1:
+            self.current_page_num += 1
+            target_y = self.page_items[self.current_page_num]["y_offset"]
+            self.canvas.verticalScrollBar().setValue(int(target_y))
 
     # --- FUNCIÓN UNIFICADA PARA GUARDAR ---
     def generate_visual_pdf(self):
         """Genera el PDF visual (con imágenes/texto) en un archivo temporal."""
         try:
-            # Crear copia en memoria del doc actual para no romperlo
-            temp_doc = fitz.open()
-            temp_doc.insert_pdf(self.doc)
-
-            # Aplicar cambios a la página actual (solo soporta 1 página editada en MVP)
-            page = temp_doc[self.current_page_num]
+            # Crear copia exacta en memoria del doc actual
+            temp_doc = fitz.open("pdf", self.doc.tobytes())
 
             for item in self.canvas.scene.items():
-                if item == self.pdf_item: continue
+                # Ignorar las imágenes de fondo del PDF
+                if isinstance(item, QGraphicsPixmapItem) and item.zValue() == -1:
+                    continue
+
+                # 1. Averiguar en qué página ha caído este elemento
+                item_y = item.sceneBoundingRect().center().y()
+                target_page_num = 0
+                page_y_offset = 0
+
+                for p_info in self.page_items:
+                    if p_info["y_offset"] <= item_y <= p_info["y_offset"] + p_info["height"]:
+                        target_page_num = p_info["page_num"]
+                        page_y_offset = p_info["y_offset"]
+                        break
+
+                page = temp_doc[target_page_num]
+
+                # 2. Insertar Texto o Imagen restando la altura acumulada (offset) para colocarlo exacto
                 if isinstance(item, DraggableTextItem):
-                    pos = item.scenePos(); x = pos.x() / self.zoom_level; y = pos.y() / self.zoom_level
+                    pos = item.scenePos()
+                    x = pos.x() / self.zoom_level
+                    y = (pos.y() - page_y_offset) / self.zoom_level
                     text = item.toPlainText()
                     qcolor = item.defaultTextColor()
                     pdf_color = (qcolor.redF(), qcolor.greenF(), qcolor.blueF())
                     font_size = item.font().pointSize()
                     point = fitz.Point(x, y + font_size)
                     page.insert_text(point, text, fontsize=font_size, fontname="helv", color=pdf_color)
+
                 elif isinstance(item, DraggableImageItem):
                     from PyQt6.QtCore import QBuffer, QByteArray
+                    transform = QTransform().rotate(item.rotation())
+                    rotated_pixmap = item.pixmap().transformed(transform, Qt.TransformationMode.SmoothTransformation)
+
                     ba = QByteArray(); buf = QBuffer(ba); buf.open(QBuffer.OpenModeFlag.WriteOnly)
-                    item.pixmap().save(buf, "PNG")
-                    scale = item.scale()
-                    rotation = int(item.rotation()) % 360
-                    orig_w = item.pixmap().width(); orig_h = item.pixmap().height()
-                    scaled_w = orig_w * scale; scaled_h = orig_h * scale
-                    scene_center = item.sceneBoundingRect().center()
-                    pdf_center_x = scene_center.x() / self.zoom_level
-                    pdf_center_y = scene_center.y() / self.zoom_level
-                    final_w = scaled_w / self.zoom_level
-                    final_h = scaled_h / self.zoom_level
-                    rect = fitz.Rect(pdf_center_x - final_w/2, pdf_center_y - final_h/2,
-                                     pdf_center_x + final_w/2, pdf_center_y + final_h/2)
-                    page.insert_image(rect, stream=ba.data(), rotate=rotation)
+                    rotated_pixmap.save(buf, "PNG")
+
+                    scene_rect = item.sceneBoundingRect()
+                    pdf_x0 = scene_rect.left() / self.zoom_level
+                    pdf_y0 = (scene_rect.top() - page_y_offset) / self.zoom_level
+                    pdf_x1 = scene_rect.right() / self.zoom_level
+                    pdf_y1 = (scene_rect.bottom() - page_y_offset) / self.zoom_level
+                    rect = fitz.Rect(pdf_x0, pdf_y0, pdf_x1, pdf_y1)
+
+                    page.insert_image(rect, stream=bytes(ba), rotate=0)
 
             # Guardar en archivo temporal
             fd, temp_path = tempfile.mkstemp(suffix=".pdf")

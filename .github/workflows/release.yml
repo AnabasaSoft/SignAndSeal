@@ -31,7 +31,7 @@ jobs:
 
       - name: Build Binary with PyInstaller
         run: |
-          pyinstaller --onefile --noconsole --clean \
+          pyinstaller --onefile --noconsole --clean --hidden-import=cv2 \
             --add-data "sign_and_seal_icon.png:." \
             --name "SignAndSeal" \
             sign_and_seal.py
@@ -99,7 +99,7 @@ jobs:
       - name: Build EXE
         # En Windows el separador es ;
         run: |
-          pyinstaller --onefile --noconsole --clean `
+          pyinstaller --onefile --noconsole --clean --hidden-import=cv2 `
             --add-data "sign_and_seal_icon.png;." `
             --name "SignAndSeal" `
             sign_and_seal.py
@@ -132,7 +132,7 @@ jobs:
       - name: Build App Bundle
         # En Mac el separador es :
         run: |
-          pyinstaller --windowed --clean \
+          pyinstaller --windowed --clean --hidden-import=cv2 \
             --add-data "sign_and_seal_icon.png:." \
             --name "SignAndSeal" \
             --icon "sign_and_seal_icon.png" \
