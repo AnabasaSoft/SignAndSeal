@@ -9,6 +9,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: write
+
 jobs:
   # ------------------------------------------------------------------
   # JOB 1: LINUX (.deb y .rpm)
