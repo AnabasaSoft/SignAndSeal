@@ -68,11 +68,11 @@ jobs:
 
           # Generar .rpm
           fpm -s dir -t rpm -n sign-and-seal -v 5.0.0 \
-            -C dist/linux_pkg \
-            -p dist/SignAndSeal-5.0.0.x86_64.rpm \
-            --description "Legal PDF Signer for Linux" \
-            --maintainer "AnabasaSoft <anabasasoft@gmail.com>" \https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-            usr
+              -C dist/linux_pkg \
+              -p dist/SignAndSeal-5.0.0.x86_64.rpm \
+              --description "Legal PDF Signer for Linux" \
+              --maintainer "AnabasaSoft <anabasasoft@gmail.com>" \
+              usr
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
@@ -154,27 +154,27 @@ jobs:
           name: macOS-App
           path: dist/SignAndSeal-macOS.zip
 
-    # ------------------------------------------------------------------
-    # JOB 4: PUBLICAR EN GITHUB RELEASES
-    # ------------------------------------------------------------------
-    publish-release:
-        needs: [build-linux, build-windows, build-macos]
-        runs-on: ubuntu-latest
-        if: startsWith(github.ref, 'refs/tags/v')
-        steps:
-            - name: Download all artifacts
-            uses: actions/download-artifact@v4
-            with:
-                path: dist
-                merge-multiple: true
+  # ------------------------------------------------------------------
+  # JOB 4: PUBLICAR EN GITHUB RELEASES
+  # ------------------------------------------------------------------
+  publish-release:
+      needs: [build-linux, build-windows, build-macos]
+      runs-on: ubuntu-latest
+      if: startsWith(github.ref, 'refs/tags/v')
+      steps:
+        - name: Download all artifacts
+          uses: actions/download-artifact@v4
+          with:
+            path: dist
+            merge-multiple: true
 
-                    - name: Create GitHub Release
-                    uses: softprops/action-gh-release@v2
-                    with:
-                        files: |
-                            dist/*.deb
-                            dist/*.rpm
-                            dist/*.exe
-                            dist/*.zip
-                            env:
-                                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        - name: Create GitHub Release
+          uses: softprops/action-gh-release@v2
+          with:
+            files: |
+              dist/*.deb
+              dist/*.rpm
+              dist/*.exe
+              dist/*.zip
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
